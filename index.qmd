@@ -1,0 +1,148 @@
+---
+title: "Model examples"
+date: last-modified
+toc: true
+format: 
+  html:
+    output-dir: docs 
+---
+
+This is an example of using three different methods to analyze data with the following characteristics.
+
+* Multiple observations per individual
+* A discrete independent variable
+
+# Read packages
+
+```{r}
+library(tidyverse) # Modern R
+library(emmeans)   # Pair-wise comparisons
+library(lme4)      # Random effect models
+library(lmerTest)  # ANOVA table for random effect model
+```
+
+# Prepare demonstration data
+
+```{r}
+dset = as_tibble(iris)
+dset = dset |> 
+  mutate(Sepal = Sepal.Length * Sepal.Width,
+         Petal = Petal.Length * Petal.Width) |> 
+  select(Species, Sepal, Petal) |> 
+  group_by(Species) |> 
+  slice_sample(n = 20) |> 
+  mutate(n = 1:n()) |> 
+  ungroup()
+```
+
+This data is a modified version from the iris dataset in R.
+I calculated the area of the Sepal and Petal for each Species (*I. setosa*, *I. versicolor*, and *I. virginica*),
+so that it appears similar to your fish gill-branch area data.
+
+```{r}
+ggplot(dset) + 
+  geom_point(aes(x = Sepal, y = Petal, color = Species)) +
+  labs(title = "The area of the sepal and petal for each Iris species.")
+```
+
+# Traditional one-way ANOVA
+
+In a simple one-way ANOVA, we first sum the area of the sepal and the petal.
+
+```{r}
+d1 = dset |> 
+  mutate(Area = Sepal + Petal)
+```
+
+```{r}
+ggplot(d1) + 
+  geom_point(aes(x = Species, y = Area, color = Species),
+             position = position_jitter(0.1)) +
+  labs(title = "Is the mean area different among treatment effect?")
+```
+
+Then we test the null hypothesis that the mean value of the Area is similar across treatment effect (Species).
+
+
+
+```{r}
+m1 = lm(Area ~ Species, data = d1)
+summary.aov(m1)
+```
+
+At a significance level of 0.05, the results are significant.
+Next we could use a TukeyHSD test to test for post-hoc pair-wise differences in the mean area.
+
+```{r}
+emmeans(m1, specs = pairwise ~ Species, type = "Tukey")
+```
+
+If we look a the `$contrast` output, we can see that the difference are significant among all pair-wise comparisons.
+
+# Multivariate ANOVA (MANOVA)
+
+My preferred method for this type of data, where there are multiple dependent variables for each sample, would be a multivariate ANOVA.
+In this case, Sepal and Petal are multiple observations for each sample (i.e., dependent variable) and the Species is the independent variable.
+
+```{r}
+ggplot(d1) + 
+  geom_point(aes(x = Sepal, y = Petal, color = Species)) +
+  labs(title = "Is the mean area of the Sepal and Petal different among treatment effect?")
+```
+
+Here, we test the hypothesis that the mean area of the Sepal and Petal are similar across treatment effect (Species).
+
+```{r}
+m2 = lm(cbind(Sepal, Petal) ~ Species, data = d1)
+manova_result = manova(m2)
+summary(manova_result, test = "Pillai")
+```
+
+According to the Pillai statistic, the null hypothesis can be rejected at the 0.05 significance level.
+
+```{r}
+emmeans(manova_result, specs = pairwise ~ Species, type = "Tukey")
+```
+The TukeyHSD test also indicates significant difference in pair-wise comparisons.
+
+# One-way ANOVA with a random effect
+
+Random effect models are very tricky.
+Please read Ben Bolker's FAQ on GLMMs, which deals with random effect models.
+Especially read the discussion regardin "Should I treat factor xxx as fixed or random?" 
+
+URL: <https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html>
+
+In this case the fixed effect is Species and the random effect is Organ.
+In your fish data, the fixed effect would be the *treatment* and the random effect would be *gill arch #*.
+
+```{r}
+dset2 = 
+  dset |> 
+  pivot_longer(cols = c(Sepal, Petal),
+               names_to = "Organ",
+               values_to = "Area") |> 
+  mutate(Organ = factor(Organ),
+         Species = factor(Species))
+```
+
+The null hypothesis for the fixed effect is similar to that of the simple ANOVA.
+
+```{r}
+m3 = lmer(Area ~ Species +(1 | Organ), data = dset2)
+summary(m3)
+```
+
+Note there is output for randome effect, fixed effect, and the correlation among fixed effects.
+The P-values for the random effects model is provided below and indicates that null hypothesis can be rejected.
+
+```{r}
+anova(m3)
+```
+
+The TukeyHSD test also indicates significant difference in pair-wise comparisons.
+
+
+```{r}
+emmeans(m3, specs = pairwise ~ Species, type = "Tukey")
+```
